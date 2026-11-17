@@ -204,11 +204,61 @@ SQLite permite múltiples lectores, pero serializa las escrituras. Para tres tra
 
 No colocar la base de datos SQLite en una carpeta compartida SMB/NFS ni en una unidad de red.
 
-### Reintentos y doble clic
+### Idempotencia de solicitudes
 
-La restricción única sobre origen + identificador del parte evita generar dos números por un doble clic o reintento de red. Si el registro ya existe, la aplicación muestra el número previamente asignado.
+La validación del botón en el navegador (deshabilitarlo después del primer clic) es únicamente una ayuda de experiencia de usuario. No es una garantía de integridad: puede fallar, el navegador puede reenviar una petición o la respuesta puede perderse después de que el servidor haya confirmado la operación.
 
-Si se confirma que un parte puede producir más de una factura, esta regla deberá rediseñarse antes de implementar.
+Por eso, el backend implementará idempotencia mediante una clave por operación lógica:
+
+1. Al mostrar el formulario de generación, el servidor genera una clave única (UUID) y la incluye como campo oculto.
+2. Esa misma clave se conserva para todos los reintentos de la misma acción, incluidos reenvíos automáticos o manuales.
+3. El backend recibe la clave junto con el sistema de origen y el identificador del parte.
+4. En una transacción, busca si la clave ya fue procesada:
+   - Si existe y el contenido de la solicitud coincide, devuelve el mismo resultado y el mismo número de factura. No crea otro registro ni avanza la secuencia.
+   - Si existe pero los datos de la solicitud son diferentes, rechaza la petición con un conflicto (HTTP 409). Una clave no se puede reutilizar para otra operación.
+   - Si no existe, procesa la operación y persiste la clave, una huella de los parámetros y el vínculo con el registro creado.
+5. La creación del registro, el avance de la secuencia y la persistencia de la clave idempotente deben confirmarse en la misma transacción.
+6. Después de completar correctamente la operación, el formulario que se utilice para una nueva generación debe recibir una clave nueva.
+
+La clave debe generarse en el servidor o mediante un generador criptográficamente seguro en el cliente, ser impredecible y tener suficiente entropía. No debe derivarse únicamente del identificador del parte, porque una misma operación lógica y una regla de negocio de duplicados son conceptos distintos.
+
+#### Persistencia propuesta
+
+Añadir una tabla `idempotency_requests`:
+
+| Campo | Tipo lógico | Descripción |
+|---|---|---|
+| id | INTEGER | Identificador interno. |
+| idempotency_key | TEXT | Clave UUID; UNIQUE. |
+| request_fingerprint | TEXT | Hash de los parámetros normalizados relevantes. |
+| invoice_id | INTEGER | Registro resultado asociado. |
+| created_by | INTEGER | Usuario que inició la operación. |
+| created_at | DATETIME | Fecha de registro de la clave. |
+
+La clave tendrá una restricción UNIQUE. `invoice_id` será una clave foránea hacia `invoices`. El fingerprint se calculará en el servidor a partir de los datos normalizados de la operación (como sistema de origen e identificador de parte), no de valores enviados como confiables por el navegador.
+
+Si se recibe una clave ya registrada, se compara el fingerprint antes de devolver el resultado. La clave y el resultado se guardan en la misma transacción que crea la factura. Si la transacción falla, tampoco debe quedar registrada la clave como procesada.
+
+#### Idempotencia y duplicidad funcional
+
+Son dos protecciones complementarias:
+
+- **Idempotencia HTTP:** evita ejecutar dos veces la misma operación lógica cuando una petición se reenvía con la misma clave.
+- **Unicidad del parte:** evita asignar más de un número al mismo parte aunque se envíe una nueva petición con una clave diferente.
+
+Si se confirma que un parte puede producir más de una factura, habrá que redefinir la regla de unicidad funcional; la idempotencia por clave seguirá siendo necesaria.
+
+#### Comportamiento esperado
+
+| Escenario | Resultado |
+|---|---|
+| Doble clic con la misma clave | Un solo registro; ambas respuestas muestran el mismo número. |
+| Reintento tras timeout con la misma clave | Se devuelve el resultado ya confirmado. |
+| Misma clave con otro origen o identificador | HTTP 409; no se crea nada. |
+| Mismo parte con una clave nueva | Se aplica la regla de duplicidad funcional y se devuelve el registro existente o el error acordado; nunca se consume otro número. |
+| Error antes del commit | Rollback completo; un reintento puede procesarse normalmente. |
+
+La interfaz puede deshabilitar el botón tras el clic para mejorar la experiencia, pero la garantía real reside en el backend, la persistencia de la clave y las transacciones.
 
 ### Numeración existente
 
