@@ -1,0 +1,34 @@
+[project]
+name = "invoice-manager"
+version = "0.0.1"
+description = "A simple invoice manager"
+readme = "README.md"
+authors = [{ name = "leonelnm", email = "elerickmontenegro@gmail.com" }]
+requires-python = ">=3.14"
+dependencies = [
+    "fastapi[standard]>=0.163.1",
+    "alembic>=1.14",
+    "itsdangerous>=2.2",
+    "jinja2>=3.1",
+    "pydantic-settings>=2.7",
+    "pwdlib[argon2]>=0.2",
+    "sqlalchemy>=2.0",
+]
+
+[project.scripts]
+invoice-manager = "invoice_manager:main"
+
+[build-system]
+requires = ["uv_build>=0.13.9,<0.14.0"]
+build-backend = "uv_build"
+
+[tool.fastapi]
+entrypoint = "invoice_manager.main:app"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]

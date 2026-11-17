@@ -1,0 +1,1 @@
+{% extends 'base.html' %}{% block content %}<h1>{{ invoice.invoice_number }}</h1><p>Origen: {{ invoice.source_system.name }}</p><p>Parte: {{ invoice.report_id }}</p><p>Asignada por: {{ invoice.user.display_name }}</p><p>Fecha: {{ invoice.created_at }}</p>{% endblock %}
